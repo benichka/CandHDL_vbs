@@ -29,6 +29,9 @@ Dim IMGROOT: IMGROOT = "D:\temp\CandH\"
 ' URL principale
 Dim URL_MAIN: URL_MAIN = "http://explosm.net/comics/"
 
+' URL du premier comic
+Dim URL_OLDEST: URL_OLDEST = "http://explosm.net/comics/oldest"
+
 ' URL du dernier comic
 Dim URL_LATEST: URL_LATEST = "http://explosm.net/comics/latest"
 
@@ -76,14 +79,24 @@ Set regExtractURLRelImg = new RegExp
 regExtractURLRelImg.Pattern = PATTERN_URL_REL_IMG
 
 ' Expression régulière d'extraction du nom de l'image à partir de son URL complète
-Dim PATTERN_NAME_IMG: PATTERN_NAME_IMG = ".*\/(.*)"
+Dim PATTERN_NAME_IMG: PATTERN_NAME_IMG = ".*\/([^?]*)(\?.*)?"
 Set regExtractNameImg = new RegExp
 regExtractNameImg.Pattern = PATTERN_NAME_IMG
+
+' Expression régulière d'extraction de la date pour le comic actuel
+Dim PATTERN_DATE_BRUTE: PATTERN_DATE_BRUTE = "<h3 .*><a .*>(.*)<\/a><\/h3>"
+Set regExtractDateBrute = New RegExp
+regExtractDateBrute.Pattern = PATTERN_DATE_BRUTE
+
+' Expression régulière d'extraction des éléments d'une date brute
+Dim PATTERN_ELEM_DATE_BRUTE: PATTERN_ELEM_DATE_BRUTE = "[0-9]{1,4}\.[0-9]{1,2}\.[0-9]{1,2}"
+Set regExtractElemDateBrute = New RegExp
+regExtractElemDateBrute.Pattern = PATTERN_ELEM_DATE_BRUTE
 'endregion Gestion des expressions régulières
 
 'region Objets divers
 ' objet permettant la gestion d'appel HTTP
-Dim xHttp: Set xHttp = createobject("Microsoft.XMLHTTP")
+Dim xHttp: Set xHttp = createobject("MSXML2.ServerXMLHTTP")
 ' stream qui va servir pour l'écriture de fichier
 Dim bStrm: Set bStrm = createobject("Adodb.Stream")
 'endregion Objets divers
@@ -99,10 +112,10 @@ Dim silentMode
 'endregion variables d'exécution
 
 'region Intervalle de recherche
-' Intervalle de recherche inférieur
-Dim rMin
-' Intervalle de recherche supérieur
-Dim rMax
+' Intervalle de recherche inférieur (numéro et date)
+Dim rMin, dMin
+' Intervalle de recherche supérieur (numéro et date)
+Dim rMax, dMax
 'endregion Intervalle de recherche
 
 'region URLs
@@ -116,7 +129,7 @@ Dim URLRelImg, URLRelImgPrev, URLRelImgNext
 
 'region Identification des éléments
 ' Numéro des images
-Dim numImg, numImgPrev, numImgNext
+Dim numImgOldest, dateImgOldest, numImgLatest, dateImgLatest, numImgPrev, numImgNext
 'endregion Identification des éléments
 'endregion Variables
 
@@ -189,6 +202,19 @@ Function ExtraitNumImg(regExImg, p_URLRelativeImg)
 End Function
 
 '*********************************************************
+' Purpose: Extraction de la date du comic
+' Inputs: regExImg : expression régulière d'extraction d'une date dans une URL relative
+' Returns: La date de la page extraite
+'*********************************************************
+Function ExtraitDateImg(regExImg)
+  ' TODO : gestion d'erreur si la date ne parvient pas à être extraite
+  Set objMatches = regExImg.Execute(xHttp.responseText)
+  Dim nbMatches: nbMatches = objMatches.Count
+  Dim result: result = objMatches(0)
+  ExtraitDateImg = objMatches(0).SubMatches(0)
+End Function
+
+'*********************************************************
 ' Purpose: Extraction du nom de l'image en fonction de son URL relative
 ' Inputs: p_URLImg : l'URL relative (sans la partie URLROOT) de l'image
 ' Returns: le nom de l'image extrait
@@ -207,7 +233,7 @@ End Function
 ' Returns: l'intervalle maximal ; dans la même temps, la variable globale est aussi
 '          valorisé avec celui-ci
 '*********************************************************
-Function CalcIntervalleMaxPerma()
+Sub CalcIntervalleMaxPerma()
 
   ' Appel initial vers le dernier comic en date
   Call Appel(URL_LATEST, 1)
@@ -216,14 +242,51 @@ Function CalcIntervalleMaxPerma()
   URLPageImg = ExtraitLien(regExtractURLCur)
 
   ' Extraction du numéro de l'image sur la page qui déterminera l'intervalle maximal
-  numImg = ExtraitNumImg(regExtractNumImg, URLPageImg)
+  numImgLatest = ExtraitNumImg(regExtractNumImg, URLPageImg)
 
-  ' Valorisation de l'intervalle maximal et retour de fonction
-  rMax = numImg
+  ' Extraction de la date de la page actuelle
+  dateImgLatest = ExtraitDateImg(regExtractDateBrute)
 
-  ' TODO : valorisation de la date max
+  ' Appel vers le premier comic
+  Call Appel(URL_OLDEST, 1)
+'
+  ' Extraction du lien à partir du permalien de la page
+  URLPageImg = ExtraitLien(regExtractURLCur)
 
-  CalcIntervalleMaxPerma = rMax
+  ' Extraction du numéro de l'image sur la page qui déterminera l'intervalle maximal
+  numImgOldest = ExtraitNumImg(regExtractNumImg, URLPageImg)
+
+  ' Extraction de la date brute de la page actuelle
+  dateImgOldest = ExtraitDateImg(regExtractDateBrute)
+
+  ' Valorisation de l'intervalle maximal
+  rMax = numImgLatest
+
+  ' Valorisation de la date maximale
+  dMax = DateBruteToDate(dateImgLatest)
+
+  ' Valorisation de l'intervalle minimal
+  rMin = numImgOldest
+
+  ' Valorisation de la date minimale
+  dMin = DateBruteToDate(dateImgOldest)
+End Sub
+
+'*********************************************************
+' Purpose: Récupération des images dans l'intervalle renseigné
+' Inputs: dateMin : date minimum
+'         dateMax : date maximum
+'*********************************************************
+Function GetImgsIntervalleDate(dateMin, dateMax)
+  ' Il n'est pas possible de télécharger une image directement depuis sa date ;
+  ' on télécharge donc la première image en se basant sur les archives et on considère
+  ' que l'on change de jour en changeant le numéro de l'image
+
+  Dim numMin, numMax
+
+  numMin = GetImgNumFromDate(dateMin)
+  numMax = GetImgNumFromDate(dateMax)
+  Call GetImgsIntervalle(numMin, numMax)
 End Function
 
 '*********************************************************
@@ -248,6 +311,43 @@ End Function
 'endregion Gestion des intervalles minimal et maximal
 
 'region Gestion des téléchargements
+
+'*********************************************************
+' Purpose: Récupération du numéro d'une image en fonction de sa date
+' Inputs: dateImg : la date de l'image
+' Return: le numéro de l'image
+'*********************************************************
+Function GetImgNumFromDate(dateImg)
+  Dim URLRootArchive: URLRootArchive = "http://explosm.net/comics/archive/"
+  Dim annee: annee = DatePart("yyyy", dateImg)
+  Dim mois: mois = DatePart("m", dateImg)
+  If (Len(mois) = 1) Then
+    mois = "0" & mois
+  End If
+  Dim jour: jour = DatePart("d", dateImg)
+  If (Len(jour) = 1) Then
+    jour = "0" & jour
+  End If
+
+  ' Appel de l'URL pour les archives du mois demandé
+  Call Appel(URLRootArchive & annee & "/" & mois, 1)
+
+  ' Extraction du numéro
+  Dim patternExtractNum: patternExtractNum = "<a href=""(.*)\/([0-9]*)\/"">" & annee & "." & mois & "." & jour
+  Set regExtractNum = New RegExp
+  regExtractNum.Pattern = patternExtractNum
+
+  Set objMatches = regExtractNum.Execute(xHttp.ResponseText)
+  Dim nbMatches: nbMatches = objMatches.Count
+  If(nbMatches > 0) Then
+    Dim result: result = objMatches(0)
+    GetImgNumFromDate = objMatches(0).SubMatches(1)
+  Else
+    WScript.Echo "Erreur : il n'y a pas de comic en date du " & dateImg & "."
+    WScript.Quit ERREUR_TECHNIQUE
+  End If
+End Function
+
 '*********************************************************
 ' Purpose: Récupération d'une image en particulier, en fonction de son numéro d'image
 ' Inputs: p_numImg : le numéro de l'image (c'est à dire son numéro de page)
@@ -272,9 +372,24 @@ Function DlImg(p_numImg)
     ' extraction du nom de l'image
     Dim imgName: imgName = ExtractImgName(URLCurrentImg)
 
+    Dim imgDateBrute, imgDate
+
+    Set matchDateBrute = regExtractDateBrute.Execute(xHttp.responseText)
+    imgDateBrute = matchDateBrute(0).SubMatches(0)
+    imgDate = DateBruteToDate(imgDateBrute)
+    Dim imgDateToWriteMonth: imgDateToWriteMonth = DatePart("m", imgDate)
+    If(Len(imgDateToWriteMonth) = 1) Then
+      imgDateToWriteMonth = "0" & imgDateToWriteMonth
+    End If
+    Dim imgDateToWriteDay: imgDateToWriteDay = DatePart("d", imgDate)
+    If(Len(imgDateToWriteDay) = 1) Then
+      imgDateToWriteDay = "0" & imgDateToWriteDay
+    End If
+    Dim imgDateToWrite: imgDateToWrite = DatePart("yyyy", imgDate) & imgDateToWriteMonth & imgDateToWriteDay
+
     ' Initialisation des emplacements source et cible pour l'image à télécharger
     Dim URLSourceCurrentImg: URLSourceCurrentImg = URLCurrentImg
-    Dim URLTargetCurrentImg: URLTargetCurrentImg = IMGROOT & p_numImg & " - " & imgName
+    Dim URLTargetCurrentImg: URLTargetCurrentImg = IMGROOT & p_numImg & " - " & imgDateToWrite & " - " & imgName
 
     ' Téléchargement de l'image
     objXMLHTTPImg.Open "GET", URLSourceCurrentImg, False
@@ -342,7 +457,7 @@ Function ExtractArguments()
         case "dl"
           Call ProcessDL(WScript.Arguments.Named.Item(arg))
         case "dll"
-          Call ProcessDLL(WScript.Arguments.Named.Item(arg))
+          Call ProcessDLL()
         case "s", "h"
         case Else
           Call AffichageParametre("Erreur : argument incorrect : " + arg _
@@ -375,15 +490,116 @@ End Function
 ' Inputs: value : valeur de l'argument
 '*********************************************************
 Function ProcessDL(value)
-  WScript.Echo "ProcessDL value : " & value
+  Dim modeDate: modeDate = 1
+  Dim modeIntervalle: modeIntervalle = 2
+  Dim mode
+
+  Dim paramDate, paramDateIntervalleMin, paramDateIntervalleMax
+
+  ' TODO : ProcessDL sur un numéro
+  ' TODO : ProcessDL sur un intervalle de numéro
+
+  ' Pattern de date
+  ' Exemple de chaine : 2017-01-01
+  Dim PATTERN_DATE_ARG: PATTERN_DATE_ARG = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+  ' Expression régulière d'extraction d'une date
+  Set regExtractDateArg = New RegExp
+  regExtractDateArg.Pattern = PATTERN_DATE_ARG
+
+  Set objMatchesDate = regExtractDateArg.Execute(value)
+  Dim nbMatchesDate: nbMatchesDate = objMatchesDate.Count
+  If(nbMatchesDate > 0) Then
+    mode = modeDate
+    If (IsDate(value)) Then
+      paramDate = CDate(value)
+    Else
+      WScript.Echo "Erreur : la date est invalide."
+      WScript.Quit ERREUR_TECHNIQUE
+    End If
+  End If
+
+  ' Pattern d'intervalle de date
+  ' Exemple de chaine : [2017-01-01;2017-05-01]
+  Dim PATTERN_INTERVALLE: PATTERN_INTERVALLE = "^\[([0-9]{4}-[0-9]{2}-[0-9]{2});([0-9]{4}-[0-9]{2}-[0-9]{2})]$"
+  ' Expression régulière d'extraction d'une date
+  Set regExtractIntervalle = New RegExp
+  regExtractIntervalle.Pattern = PATTERN_INTERVALLE
+
+  Set objMatchesIntervalle = regExtractIntervalle.Execute(value)
+  Dim nbMatchesIntervalle: nbMatchesIntervalle = objMatchesIntervalle.Count
+  If(nbMatchesIntervalle > 0) Then
+    mode = modeIntervalle
+    If (IsDate(objMatchesIntervalle(0).SubMatches(0))) Then
+      paramDateIntervalleMin = CDate(objMatchesIntervalle(0).SubMatches(0))
+    Else
+      WScript.Echo "Erreur : la date de la borne inférieure est invalide."
+      WScript.Quit ERREUR_TECHNIQUE
+    End If
+    If (IsDate(objMatchesIntervalle(0).SubMatches(1))) Then
+      paramDateIntervalleMax = CDate(objMatchesIntervalle(0).SubMatches(1))
+    Else
+      WScript.Echo "Erreur : la date de la borne supérieure est invalide."
+      WScript.Quit ERREUR_TECHNIQUE
+    End If
+  End If
+
+  ' Contrôle des dates
+  If (mode = modeDate) Then
+    If(DateDiff("d", paramDate, dMin) > 0) Then
+      WScript.Echo "La date est inférieure à la date du premier comic : elle a été remplacée par celle-ci."
+      paramDate = dMin
+    End If
+    If(DateDiff("d", paramDate, dMax) < 0) Then
+      WScript.Echo "Erreur : la borne supérieure est supérieure à la date du dernier comic : elle a été remplacée par celle-ci."
+      paramDateIntervalleMax = dMax
+    End If
+  ElseIf (mode = modeIntervalle) Then
+    ' Pour l'intervalle, la borne inférieure doit en plus être inférieure ou égale à la borne supérieure
+    If (DateDiff("d", paramDateIntervalleMin, paramDateIntervalleMax) < 0) Then
+      WScript.Echo "Erreur : la borne inférieure doit être supérieure ou égale à la borne supérieure."
+      WScript.Quit ERREUR_TECHNIQUE
+    End If
+
+    If(DateDiff("d", paramDateIntervalleMin, dMin) > 0) Then
+      WScript.Echo "La borne inférieure est inférieure à la date du premier comic : elle a été remplacée par celle-ci."
+      paramDateIntervalleMin = dMin
+    End If
+    If(DateDiff("d", paramDateIntervalleMax, dMax) < 0) Then
+      WScript.Echo "La borne supérieure est supérieure à la date du dernier comic : elle a été remplacée par celle-ci."
+      paramDateIntervalleMax = dMax
+    End If
+
+    Call GetImgsIntervalleDate(paramDateIntervalleMin, paramDateIntervalleMax)
+  End If
 End Function
 
 '*********************************************************
 ' Purpose: Traite le passage d'argument /dll
-' Inputs: value : valeur de l'argument
 '*********************************************************
-Function ProcessDLL(value)
+Function ProcessDLL()
+  ' TODO : ProcessDLL : récupération du numéro de la dernière image téléchargé puis téléchargement
+  ' à partir de n + 1
   WScript.Echo "ProcessDLL value : " & value
+End Function
+
+'*********************************************************
+' Purpose: Converti une date brute (2005.12.31) en une vraie date
+' Inputs: value : valeur de la date brute
+'*********************************************************
+Function DateBruteToDate(value)
+  Dim PATTERN_EXTRACT: PATTERN_EXTRACT = "^([0-9]{4})\.([0-9]{2})\.([0-9]{2})$"
+  ' Expression régulière d'extraction d'une date
+  Set regExtract = New RegExp
+  regExtract.Pattern = PATTERN_EXTRACT
+
+  Set objMatchesExtract = regExtract.Execute(value)
+  Dim nbMatches: nbMatches = objMatchesExtract.Count
+  If(nbMatches > 0) Then
+    Dim annee: annee = objMatchesExtract(0).SubMatches(0)
+    Dim mois: mois = objMatchesExtract(0).SubMatches(1)
+    Dim jour: jour = objMatchesExtract(0).SubMatches(2)
+    DateBruteToDate = CDate(jour & "/" & mois & "/" & annee)
+  End If
 End Function
 'endregion Métier
 
