@@ -1,4 +1,6 @@
 ' Script de téléchargement des comics Cyanide and Hapiness
+' Ce script doit être exécuté avec la commande cscript et non wscript (par défaut)
+
 'region Constantes
 '***********************************************
 '|                 Constantes                  |
